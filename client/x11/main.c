@@ -1404,7 +1404,7 @@ main (int argc, char **argv)
     gdk_set_allowed_backends ("x11");
 #endif
 
-    gtk_init (&argc, &argv);
+    gdk_init (&argc, &argv);
     XSetErrorHandler (_xerror_handler);
     XSetIOErrorHandler (_xerror_io_handler);
 
