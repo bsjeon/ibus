@@ -1122,6 +1122,7 @@ static void ResetICMessageProc (XIMS ims,
                        total_size);
     FrameMgrFree (fm);
     XFree(reply);
+    XFree(resetic->commit_string);
 }
 
 static int WireEventToEvent (Xi18n i18n_core,
