@@ -128,6 +128,35 @@ static IBusBus *_bus = NULL;
 
 static char _use_sync_mode = 1;
 
+static char *
+utf8_string_to_compound_text (const gchar *utf8_string)
+{
+    XTextProperty tp;
+    int ret;
+
+    ret = Xutf8TextListToTextProperty (GDK_DISPLAY_XDISPLAY (gdk_display_get_default ()),
+                                       (char **)&utf8_string, 1,
+                                       XCompoundTextStyle, &tp);
+    /* XCompoundTextStyle uses the encoding escaped sequence + encoded chars
+     * matched to the specified multibyte characters: text->text, and
+     * libX11.so sorts the encoding sets by locale.
+     * If an encoded string fails to be matched, ibus-x11 specifies the
+     * ISO10641-1 encoding and that escaped sequence is "\033%G":
+     * https://gitlab.freedesktop.org/xorg/lib/libx11/-/blob/master/src/xlibi18n/lcCT.c
+     * , and the encoding is UTF-8 with utf8_wctomb():
+     * https://gitlab.freedesktop.org/xorg/lib/libx11/-/blob/master/src/xlibi18n/lcUniConv/utf8.h
+     */
+    if (ret == EXIT_FAILURE)
+    {
+        XFree (tp.value);
+        tp.value = (unsigned char *)g_strdup_printf ("%s%s",
+                                                     ESC_SEQUENCE_ISO10646_1,
+                                                     utf8_string);
+    }
+
+    return (char *)tp.value;
+}
+
 static void
 _xim_preedit_start (XIMS xims, const X11IC *x11ic)
 {
@@ -184,7 +213,6 @@ _xim_preedit_callback_draw (XIMS xims, X11IC *x11ic, const gchar *preedit_string
 {
     IMPreeditCBStruct pcb;
     XIMText text;
-    XTextProperty tp;
 
     static XIMFeedback *feedback;
     static gint feedback_len = 0;
@@ -258,22 +286,13 @@ _xim_preedit_callback_draw (XIMS xims, X11IC *x11ic, const gchar *preedit_string
     text.feedback = feedback;
 
     if (len > 0) {
-        int ret = Xutf8TextListToTextProperty (
-                GDK_DISPLAY_XDISPLAY (gdk_display_get_default ()),
-                (char **)&preedit_string,
-                1, XCompoundTextStyle, &tp);
-        if (ret == EXIT_FAILURE) {
-            XFree (tp.value);
-            tp.value = (unsigned char *)g_strdup_printf (
-                    "%s%s",
-                    ESC_SEQUENCE_ISO10646_1,
-                    preedit_string);
-        }
+        char *compound_text = utf8_string_to_compound_text (preedit_string);
+
         text.encoding_is_wchar = 0;
-        text.length = strlen ((char*)tp.value);
-        text.string.multi_byte = (char*)tp.value;
+        text.length = strlen (compound_text);
+        text.string.multi_byte = compound_text;
         IMCallCallback (xims, (XPointer) & pcb);
-        XFree (tp.value);
+        XFree (compound_text);
     } else {
         text.encoding_is_wchar = 0;
         text.length = 0;
@@ -1049,37 +1068,18 @@ _context_commit_text_cb (IBusInputContext *context,
     g_assert (IBUS_IS_TEXT (text));
     g_assert (x11ic != NULL);
 
-    XTextProperty tp;
     IMCommitStruct cms = {0};
-    int ret;
 
-    ret = Xutf8TextListToTextProperty (
-            GDK_DISPLAY_XDISPLAY (gdk_display_get_default ()),
-            (gchar **)&(text->text), 1, XCompoundTextStyle, &tp);
-    /* XCompoundTextStyle uses the encoding escaped sequence + encoded chars
-     * matched to the specified multibyte characters: text->text, and
-     * libX11.so sorts the encoding sets by locale.
-     * If an encoded string fails to be matched, ibus-x11 specifies the
-     * ISO10641-1 encoding and that escaped sequence is "\033%G":
-     * https://gitlab.freedesktop.org/xorg/lib/libx11/-/blob/master/src/xlibi18n/lcCT.c
-     * , and the encoding is UTF-8 with utf8_wctomb():
-     * https://gitlab.freedesktop.org/xorg/lib/libx11/-/blob/master/src/xlibi18n/lcUniConv/utf8.h
-     */
-    if (ret == EXIT_FAILURE) {
-        XFree (tp.value);
-        tp.value = (unsigned char *)g_strdup_printf ("%s%s",
-                                                     ESC_SEQUENCE_ISO10646_1,
-                                                     text->text);
-    }
+    char *compound_text = utf8_string_to_compound_text (text->text);
 
     cms.major_code = XIM_COMMIT;
     cms.icid = x11ic->icid;
     cms.connect_id = x11ic->connect_id;
     cms.flag = XimLookupChars;
-    cms.commit_string = (gchar *)tp.value;
+    cms.commit_string = compound_text;
     IMCommitString (_xims, (XPointer) & cms);
 
-    XFree (tp.value);
+    XFree (compound_text);
 }
 
 static void
