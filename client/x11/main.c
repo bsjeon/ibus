@@ -83,6 +83,7 @@ struct _X11IC {
     IBusAttrList    *preedit_attrs;
     gint             preedit_cursor;
     gboolean         preedit_visible;
+    guint            preedit_mode;
     gboolean         preedit_started;
     gint             onspot_preedit_length;
 };
@@ -103,6 +104,7 @@ static void     _context_update_preedit_text_cb
                                              IBusText           *text,
                                              gint                cursor_pos,
                                              gboolean            visible,
+                                             guint               mode,
                                              X11IC              *x11ic);
 static void     _context_show_preedit_text_cb
                                             (IBusInputContext   *context,
@@ -380,12 +382,14 @@ xim_create_ic (XIMS xims, IMChangeICStruct *call_data)
         g_return_val_if_reached (0);
     }
 
+    ibus_input_context_set_client_commit_preedit (x11ic->context, TRUE);
+
     g_signal_connect (x11ic->context, "commit-text",
                         G_CALLBACK (_context_commit_text_cb), x11ic);
     g_signal_connect (x11ic->context, "forward-key-event",
                         G_CALLBACK (_context_forward_key_event_cb), x11ic);
 
-    g_signal_connect (x11ic->context, "update-preedit-text",
+    g_signal_connect (x11ic->context, "update-preedit-text-with-mode",
                         G_CALLBACK (_context_update_preedit_text_cb), x11ic);
     g_signal_connect (x11ic->context, "show-preedit-text",
                         G_CALLBACK (_context_show_preedit_text_cb), x11ic);
@@ -970,6 +974,41 @@ xim_reset_ic (XIMS xims, IMResetICStruct *call_data)
                                            GINT_TO_POINTER ((gint) call_data->icid));
     g_return_val_if_fail (x11ic != NULL, 0);
 
+    call_data->major_code    = XIM_RESET_IC_REPLY;
+    call_data->minor_code    = 0;
+    call_data->connect_id    = x11ic->connect_id;
+    call_data->icid          = x11ic->icid;
+    call_data->length        = 0;
+    call_data->commit_string = NULL;
+
+    if (x11ic->preedit_mode == IBUS_ENGINE_PREEDIT_COMMIT &&
+        x11ic->preedit_string &&
+        x11ic->preedit_visible) {
+
+        /* freed in util/IMdkit/i18nPtHdr.c::ResetICMessageProc() */
+        char *commit_string = utf8_string_to_compound_text (x11ic->preedit_string);
+
+        call_data->length = strlen (commit_string);
+        call_data->commit_string = commit_string;
+    }
+
+    if (x11ic->preedit_string) {
+        g_free (x11ic->preedit_string);
+        x11ic->preedit_string = NULL;
+    }
+
+    if (x11ic->preedit_attrs) {
+        g_object_unref (x11ic->preedit_attrs);
+        x11ic->preedit_attrs = NULL;
+    }
+
+    x11ic->preedit_cursor = 0;
+    x11ic->preedit_visible = FALSE;
+    x11ic->preedit_mode = IBUS_ENGINE_PREEDIT_CLEAR;
+
+    x11ic->preedit_started = FALSE;
+    x11ic->onspot_preedit_length = 0;
+
     ibus_input_context_reset (x11ic->context);
 
     return 1;
@@ -1118,6 +1157,7 @@ _context_update_preedit_text_cb (IBusInputContext *context,
                                  IBusText         *text,
                                  gint              cursor_pos,
                                  gboolean          visible,
+                                 guint             mode,
                                  X11IC            *x11ic)
 {
     g_assert (IBUS_IS_INPUT_CONTEXT (context));
@@ -1138,6 +1178,7 @@ _context_update_preedit_text_cb (IBusInputContext *context,
 
     x11ic->preedit_cursor = cursor_pos;
     x11ic->preedit_visible = visible;
+    x11ic->preedit_mode = mode;
 
     _update_preedit (x11ic);
 }
