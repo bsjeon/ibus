@@ -168,6 +168,8 @@ _xim_preedit_start (XIMS xims, const X11IC *x11ic)
     ips.icid = x11ic->icid;
     ips.connect_id = x11ic->connect_id;
     IMPreeditStart (xims, (XPointer)&ips);
+
+    LOG (1, "<< XIM_PREEDIT_ENABLE: ic=%d connect_id=%d", x11ic->icid, x11ic->connect_id);
 }
 
 static void
@@ -179,6 +181,8 @@ _xim_preedit_end (XIMS xims, const X11IC *x11ic)
     ips.icid = x11ic->icid;
     ips.connect_id = x11ic->connect_id;
     IMPreeditEnd (xims, (XPointer)&ips);
+
+    LOG (1, "<< XIM_PREEDIT_DISABLE: ic=%d connect_id=%d", x11ic->icid, x11ic->connect_id);
 }
 
 
@@ -186,13 +190,14 @@ static void
 _xim_preedit_callback_start (XIMS xims, const X11IC *x11ic)
 {
     IMPreeditCBStruct pcb;
-
     pcb.major_code        = XIM_PREEDIT_START;
     pcb.minor_code        = 0;
     pcb.connect_id        = x11ic->connect_id;
     pcb.icid              = x11ic->icid;
     pcb.todo.return_value = 0;
     IMCallCallback (xims, (XPointer) & pcb);
+
+    LOG (1, "<< XIM_PREEDIT_START: ic=%d connect_id=%d", x11ic->icid, x11ic->connect_id);
 }
 
 
@@ -200,13 +205,14 @@ static void
 _xim_preedit_callback_done (XIMS xims, const X11IC *x11ic)
 {
     IMPreeditCBStruct pcb;
-
     pcb.major_code        = XIM_PREEDIT_DONE;
     pcb.minor_code        = 0;
     pcb.connect_id        = x11ic->connect_id;
     pcb.icid              = x11ic->icid;
     pcb.todo.return_value = 0;
     IMCallCallback (xims, (XPointer) & pcb);
+
+    LOG (1, "<< XIM_PREEDIT_DONE: ic=%d connect_id=%d", x11ic->icid, x11ic->connect_id);
 }
 
 
@@ -303,6 +309,8 @@ _xim_preedit_callback_draw (XIMS xims, X11IC *x11ic, const gchar *preedit_string
         len = 0;
     }
     x11ic->onspot_preedit_length = len;
+
+    LOG (1, "<< XIM_PREEDIT_DRAW: ic=%d connect_id=%d", x11ic->icid, x11ic->connect_id);
 }
 
 static int
@@ -503,6 +511,8 @@ _xim_forward_key_event_done (X11IC   *x11ic,
     }
     g_assert (x11ic);
     g_assert (event);
+
+    LOG (1, "<< XIM_FORWARD_EVENT: ic=%d connect_id=%d", x11ic->icid, x11ic->connect_id);
 
     memset (&fe, 0, sizeof (fe));
     fe.major_code = XIM_FORWARD_EVENT;
@@ -957,6 +967,8 @@ xim_get_ic_values (XIMS xims, IMChangeICStruct *call_data)
         }
     }
 
+    LOG (1, "<< XIM_GET_IC_VALUES_REPLY ic=%d connect_id=%d", x11ic->icid, x11ic->connect_id);
+
     return 1;
 }
 
@@ -1010,6 +1022,8 @@ xim_reset_ic (XIMS xims, IMResetICStruct *call_data)
     x11ic->onspot_preedit_length = 0;
 
     ibus_input_context_reset (x11ic->context);
+
+    LOG (1, "<< XIM_RESET_IC_REPLY ic=%d connect_id=%d", x11ic->icid, x11ic->connect_id);
 
     return 1;
 }
@@ -1117,6 +1131,8 @@ _context_commit_text_cb (IBusInputContext *context,
     cms.flag = XimLookupChars;
     cms.commit_string = compound_text;
     IMCommitString (_xims, (XPointer) & cms);
+
+    LOG (1, "<< XIM_COMMIT: ic=%d connect_id=%d", x11ic->icid, x11ic->connect_id);
 
     XFree (compound_text);
 }
