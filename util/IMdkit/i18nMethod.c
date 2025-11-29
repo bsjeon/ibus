@@ -960,8 +960,12 @@ static Status xi18n_commit (XIMS ims, XPointer xp)
     register int total_size;
     unsigned char *reply = NULL;
     CARD16 str_length;
+    Xi18nClient *client;
+
+    client = (Xi18nClient *) _Xi18nFindClient (i18n_core, call_data->connect_id);
 
     call_data->flag |= XimSYNCHRONUS;  /* always sync */
+    client->sync = True;
 
     if (!(call_data->flag & XimLookupKeySym)
         &&
