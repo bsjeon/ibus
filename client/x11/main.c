@@ -37,9 +37,7 @@
 #include <IMdkit.h>
 #include <Xi18n.h>
 #include <stdio.h>
-#include <gtk/gtk.h>
-#include <gdk/gdk.h>
-#include <gdk/gdkx.h>
+#include <glib.h>
 #include <langinfo.h>
 #include <locale.h>
 #include <iconv.h>
@@ -76,7 +74,7 @@ struct _X11IC {
     gint             connect_id;
     gchar           *lang;
     gboolean         has_preedit_area;
-    GdkRectangle     preedit_area;
+    XRectangle       preedit_area;
 
     gchar           *preedit_string;
     IBusAttrList    *preedit_attrs;
@@ -113,6 +111,8 @@ static void     _context_enabled_cb         (IBusInputContext   *context,
                                              X11IC              *x11ic);
 static void     _context_disabled_cb        (IBusInputContext   *context,
                                              X11IC              *x11ic);
+static Display *_display = NULL;
+static Window   _window = 0;
 
 static GHashTable     *_x11_ic_table = NULL;
 static GHashTable     *_connections = NULL;
@@ -840,7 +840,7 @@ _xim_set_cursor_location (X11IC *x11ic)
 {
     g_return_if_fail (x11ic != NULL);
 
-    GdkRectangle preedit_area = x11ic->preedit_area;
+    XRectangle preedit_area = x11ic->preedit_area;
 
     Window w = x11ic->focus_window ?
         x11ic->focus_window :x11ic->client_window;
@@ -849,23 +849,21 @@ _xim_set_cursor_location (X11IC *x11ic)
         XWindowAttributes xwa;
         Window child;
 
-        XGetWindowAttributes (GDK_DISPLAY_XDISPLAY (gdk_display_get_default ()), w, &xwa);
+        XGetWindowAttributes (_display, w, &xwa);
         if (preedit_area.x <= 0 && preedit_area.y <= 0) {
-             XTranslateCoordinates (GDK_DISPLAY_XDISPLAY (gdk_display_get_default ()), w,
-                xwa.root,
+             XTranslateCoordinates (_display, w, xwa.root,
                 0,
                 xwa.height,
-                &preedit_area.x,
-                &preedit_area.y,
+                (int *)&preedit_area.x,
+                (int *)&preedit_area.y,
                 &child);
         }
         else {
-            XTranslateCoordinates (GDK_DISPLAY_XDISPLAY (gdk_display_get_default ()), w,
-                xwa.root,
+            XTranslateCoordinates (_display, w, xwa.root,
                 preedit_area.x,
                 preedit_area.y,
-                &preedit_area.x,
-                &preedit_area.y,
+                (int *)&preedit_area.x,
+                (int *)&preedit_area.y,
                 &child);
         }
     }
@@ -1017,12 +1015,11 @@ _xim_forward_key_event (X11IC   *x11ic,
     xkp.xkey.serial = 0L;
     xkp.xkey.send_event = False;
     xkp.xkey.same_screen = True;
-    xkp.xkey.display = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
+    xkp.xkey.display = _display;
     xkp.xkey.window =
         x11ic->focus_window ? x11ic->focus_window : x11ic->client_window;
     xkp.xkey.subwindow = None;
-    xkp.xkey.root = DefaultRootWindow (
-            GDK_DISPLAY_XDISPLAY (gdk_display_get_default ()));
+    xkp.xkey.root = DefaultRootWindow (_display);
 
     xkp.xkey.time = 0;
     xkp.xkey.state = state;
@@ -1238,20 +1235,8 @@ _xim_init_IMdkit ()
         0
     };
 
-    GdkWindowAttr window_attr = {
-        .title              = "ibus-xim",
-        .event_mask         = GDK_KEY_PRESS_MASK | GDK_KEY_RELEASE_MASK,
-        .wclass             = GDK_INPUT_OUTPUT,
-        .window_type        = GDK_WINDOW_TOPLEVEL,
-        .override_redirect   = 1,
-    };
-
     XIMStyles styles;
     XIMEncodings encodings;
-
-    GdkWindow *win;
-
-    win = gdk_window_new (NULL, &window_attr, GDK_WA_TITLE);
 
     styles.count_styles =
         sizeof (ims_styles_onspot)/sizeof (XIMStyle) - 1;
@@ -1261,13 +1246,25 @@ _xim_init_IMdkit ()
         sizeof (ims_encodings)/sizeof (XIMEncoding) - 1;
     encodings.supported_encodings = ims_encodings;
 
-    _xims = IMOpenIM (GDK_DISPLAY_XDISPLAY (gdk_display_get_default ()),
-        IMModifiers, "Xi18n",
-#if GTK_CHECK_VERSION (3, 0, 0)
-        IMServerWindow, GDK_WINDOW_XID (win),
-#else
-        IMServerWindow, GDK_WINDOW_XWINDOW (win),
+    _display = XOpenDisplay (NULL);
+    if (!_display)
+    {
+        g_warning ("Cannot open _display.");
+        exit (EXIT_FAILURE);
+    }
+
+#ifdef HAVE_XFIXES
+    XFixesSetClientDisconnectMode(_display, XFixesClientDisconnectFlagTerminate);
 #endif
+
+    _window = XCreateWindow (_display, DefaultRootWindow(_display), 0, 0, 1, 1,
+                             0, 0, InputOnly, CopyFromParent, 0, 0);
+    XMapWindow (_display, _window);
+    XFlush (_display);
+
+    _xims = IMOpenIM (_display,
+        IMModifiers, "Xi18n",
+        IMServerWindow, _window,
         IMServerName, _server_name != NULL ? _server_name : "ibus",
         IMLocale, _locale != NULL ? _locale : LOCALES_STRING,
         IMServerTransport, "X/",
@@ -1382,26 +1379,28 @@ _xerror_io_handler (Display *dpy)
     return 0;
 }
 
+static gboolean x_event_callback (GIOChannel *channel, GIOCondition condition,
+                                  gpointer user_data)
+{
+    Display *display = user_data;
+    XEvent event;
+
+    while (XPending (display))
+    {
+        XNextEvent (display, &event);
+        XFilterEvent (&event, None);
+    }
+
+    return G_SOURCE_CONTINUE;
+}
+
 int
 main (int argc, char **argv)
 {
-    /* GDK_DISPLAY_XDISPLAY() and GDK_WINDOW_XID() does not work
-     * with GdkWaylandDisplay.
-     */
-#if GTK_CHECK_VERSION (3, 10, 0)
-    gdk_set_allowed_backends ("x11");
-#endif
+    parse_options (argc, argv);
 
-    gdk_init (&argc, &argv);
     XSetErrorHandler (_xerror_handler);
     XSetIOErrorHandler (_xerror_io_handler);
-
-#ifdef HAVE_XFIXES
-    XFixesSetClientDisconnectMode(GDK_DISPLAY_XDISPLAY (gdk_display_get_default ()),
-                                  XFixesClientDisconnectFlagTerminate);
-#endif
-
-    parse_options (argc, argv);
 
     _x11_ic_table = g_hash_table_new (g_direct_hash, g_direct_equal);
     _connections = g_hash_table_new (g_direct_hash, g_direct_equal);
@@ -1426,10 +1425,17 @@ main (int argc, char **argv)
         exit (EXIT_FAILURE);
     }
 
+    int x_fd = ConnectionNumber (_display);
+    GIOChannel *x_io_channel = g_io_channel_unix_new (x_fd);
+    g_io_add_watch (x_io_channel, G_IO_IN, (GIOFunc)x_event_callback, _display);
+    g_io_channel_unref (x_io_channel);
+
     g_signal_connect (_bus, "disconnected", G_CALLBACK (_bus_disconnected_cb), main_loop);
 
     g_main_loop_run (main_loop);
     g_main_loop_unref (main_loop);
 
+    XDestroyWindow (_display, _window);
+    XCloseDisplay (_display);
     exit (EXIT_SUCCESS);
 }
