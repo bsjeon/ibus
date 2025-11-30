@@ -36,7 +36,6 @@ endif
 
 ibus_x11_SOURCES = \
 	main.c \
-	gdk-private.c \
 	$(NULL)
 
 ibus_x11_DEPENDENCIES = \
@@ -63,7 +62,6 @@ ibus_x11_CFLAGS = \
 	$(NULL)
 
 noinst_HEADERS = \
-	gdk-private.h \
 	locales.h \
 	$(NULL)
 
