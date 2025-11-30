@@ -466,17 +466,10 @@ xim_unset_ic_focus (XIMS xims, IMChangeFocusStruct *call_data)
 
 
 static void
-_xim_forward_key_event_done (X11IC   *x11ic,
-                             XEvent  *event,
-                             gboolean processed)
+_xim_forward_key_event_done (X11IC *x11ic, XEvent  *event)
 {
     IMForwardEventStruct fe;
-    if (processed) {
-        if (!x11ic->has_preedit_area) {
-            _xim_set_cursor_location (x11ic);
-        }
-        return;
-    }
+
     g_assert (x11ic);
     g_assert (event);
 
@@ -528,7 +521,7 @@ _process_key_event_done (GObject      *object,
     }
 
     if (retval == FALSE)
-        _xim_forward_key_event_done (data->x11ic, &data->event, retval);
+        _xim_forward_key_event_done (data->x11ic, &data->event);
     g_slice_free (ProcessKeyEventReplyData, data);
 }
 
@@ -565,7 +558,8 @@ _process_key_event_reply_done (GObject      *object,
      * _process_key_event_reply_done(), the key events order
      * can be swapped.
      */
-    _xim_forward_key_event_done (data->x11ic, &data->event, retval);
+    if (retval == FALSE)
+        _xim_forward_key_event_done (data->x11ic, &data->event);
     data->count = 0;
     g_source_remove (data->count_cb_id);
 }
@@ -602,7 +596,8 @@ _process_key_event_sync (X11IC                *x11ic,
                                                     keycode,
                                                     state);
     ibus_input_context_post_process_key_event (x11ic->context);
-    _xim_forward_key_event_done (x11ic, &call_data->event, retval);
+    if (retval == FALSE)
+        _xim_forward_key_event_done (x11ic, &call_data->event);
     return 1;
 }
 
@@ -694,7 +689,8 @@ _process_key_event_hybrid_async (X11IC                *x11ic,
         == NULL) {
         return 1;
     }
-    _xim_forward_key_event_done (x11ic, &call_data->event, bus_retval);
+    if (bus_retval == FALSE)
+        _xim_forward_key_event_done (x11ic, &call_data->event);
     return 1;
 }
 
@@ -714,6 +710,8 @@ xim_forward_event (XIMS xims, IMForwardEventStruct *call_data)
             _x11_ic_table,
             GINT_TO_POINTER ((gint) call_data->icid));
     g_return_val_if_fail (x11ic != NULL, 0);
+
+    _xim_set_cursor_location (x11ic);
 
     xevent = (XKeyEvent*) &(call_data->event);
 
@@ -1025,7 +1023,7 @@ _xim_forward_key_event (X11IC   *x11ic,
     xkp.xkey.state = state;
     xkp.xkey.keycode = (keycode == 0) ? 0 : keycode + 8;
 
-    _xim_forward_key_event_done (x11ic, &xkp, FALSE);
+    _xim_forward_key_event_done (x11ic, &xkp);
 }
 
 static void
