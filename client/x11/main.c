@@ -1035,9 +1035,13 @@ static void
 _bus_disconnected_cb (IBusBus  *bus,
                       gpointer  user_data)
 {
+    GMainLoop *main_loop = user_data;
+
     g_debug ("Connection closed by ibus-daemon\n");
     g_clear_object (&_bus);
-    ibus_quit ();
+
+    if (main_loop)
+        g_main_loop_quit (main_loop);
 }
 
 static void
@@ -1416,8 +1420,16 @@ main (int argc, char **argv)
         g_warning ("Can not connect to ibus daemon");
         exit (EXIT_FAILURE);
     }
-    g_signal_connect (_bus, "disconnected", G_CALLBACK (_bus_disconnected_cb), NULL);
-    ibus_main();
+
+    GMainLoop *main_loop = g_main_loop_new (NULL, FALSE);
+    if (!main_loop) {
+        exit (EXIT_FAILURE);
+    }
+
+    g_signal_connect (_bus, "disconnected", G_CALLBACK (_bus_disconnected_cb), main_loop);
+
+    g_main_loop_run (main_loop);
+    g_main_loop_unref (main_loop);
 
     exit (EXIT_SUCCESS);
 }
