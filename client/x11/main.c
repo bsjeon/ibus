@@ -1218,9 +1218,6 @@ _init_ibus (void)
 
     g_signal_connect (_bus, "disconnected",
                         G_CALLBACK (_bus_disconnected_cb), NULL);
-
-    /* https://github.com/ibus/ibus/issues/1713 */
-    _use_sync_mode = _get_char_env ("IBUS_ENABLE_SYNC_MODE", 1);
 }
 
 static void
@@ -1326,6 +1323,58 @@ _print_usage (FILE *fp, gchar *name)
         name);
 }
 
+void parse_options (int argc, char **argv)
+{
+    gint option_index = 0;
+    gint c;
+
+    while (1) {
+        static struct option long_options [] = {
+            { "debug",          1, 0, 'v'},
+            { "server-name",    1, 0, 'n'},
+            { "locale",         1, 0, 'l'},
+            { "locale-append",  1, 0, 'a'},
+            { "kill-daemon",    0, 0, 'k'},
+            { "help",           0, 0, 0 },
+            { 0, 0, 0, 0 },
+        };
+
+        c = getopt_long (argc, argv, "v:n:l:a:k", long_options, &option_index);
+        if (c == -1) break;
+
+        switch (c) {
+        case 'v':
+            g_debug_level = atoi (optarg);
+            break;
+        case 'n':
+            g_free (_server_name);
+            _server_name = g_strdup (optarg);
+            break;
+        case 'l':
+            g_free (_locale);
+            _locale = g_strdup (optarg);
+            break;
+        case 'a':
+            gchar *tmp = g_strdup_printf ("%s,%s",
+                    _locale != NULL ? _locale : LOCALES_STRING, optarg);
+            g_free (_locale);
+            _locale = tmp;
+            break;
+        case 'k':
+            _kill_daemon = TRUE;
+            break;
+        case 'h':
+        case '?':
+        default:
+            _print_usage (stderr, argv[0]);
+            exit (EXIT_FAILURE);
+        }
+    }
+
+    /* https://github.com/ibus/ibus/issues/1713 */
+    _use_sync_mode = _get_char_env ("IBUS_ENABLE_SYNC_MODE", 1);
+}
+
 static int
 _xerror_handler (Display *dpy, XErrorEvent *e)
 {
@@ -1353,9 +1402,6 @@ _xerror_io_handler (Display *dpy)
 int
 main (int argc, char **argv)
 {
-    gint option_index = 0;
-    gint c;
-
     /* GDK_DISPLAY_XDISPLAY() and GDK_WINDOW_XID() does not work
      * with GdkWaylandDisplay.
      */
@@ -1372,76 +1418,7 @@ main (int argc, char **argv)
                                   XFixesClientDisconnectFlagTerminate);
 #endif
 
-    while (1) {
-        static struct option long_options [] = {
-            { "debug", 1, 0, 0},
-            { "server-name", 1, 0, 0},
-            { "locale", 1, 0, 0},
-            { "locale-append", 1, 0, 0},
-            { "help", 0, 0, 0},
-            { "kill-daemon", 0, 0, 0},
-            { 0, 0, 0, 0},
-        };
-
-        c = getopt_long (argc, argv, "v:n:l:k:a",
-            long_options, &option_index);
-
-        if (c == -1) break;
-
-        switch (c) {
-        case 0:
-            if (g_strcmp0 (long_options[option_index].name, "debug") == 0) {
-                g_debug_level = atoi (optarg);
-            }
-            else if (g_strcmp0 (long_options[option_index].name, "server-name") == 0) {
-                g_free (_server_name);
-                _server_name = g_strdup (optarg);
-            }
-            else if (g_strcmp0 (long_options[option_index].name, "locale") == 0) {
-                g_free (_locale);
-                _locale = g_strdup (optarg);
-            }
-            else if (g_strcmp0 (long_options[option_index].name, "locale-append") == 0) {
-                gchar *tmp = g_strdup_printf ("%s,%s",
-                                _locale != NULL ? _locale : LOCALES_STRING, optarg);
-                g_free (_locale);
-                _locale = tmp;
-            }
-            else if (g_strcmp0 (long_options[option_index].name, "help") == 0) {
-                _print_usage (stdout, argv[0]);
-                exit (EXIT_SUCCESS);
-            }
-            else if (g_strcmp0 (long_options[option_index].name, "kill-daemon") == 0) {
-                _kill_daemon = TRUE;
-            }
-            break;
-        case 'v':
-            g_debug_level = atoi (optarg);
-            break;
-        case 'n':
-            g_free (_server_name);
-            _server_name = g_strdup (optarg);
-            break;
-        case 'l':
-            g_free (_locale);
-            _locale = g_strdup (optarg);
-            break;
-        case 'a': {
-                gchar *tmp = g_strdup_printf ("%s,%s",
-                                _locale != NULL ? _locale : LOCALES_STRING, optarg);
-                g_free (_locale);
-                _locale = tmp;
-            }
-            break;
-        case 'k':
-            _kill_daemon = TRUE;
-            break;
-        case '?':
-        default:
-            _print_usage (stderr, argv[0]);
-            exit (EXIT_FAILURE);
-        }
-    }
+    parse_options (argc, argv);
 
     _x11_ic_table = g_hash_table_new (g_direct_hash, g_direct_equal);
     _connections = g_hash_table_new (g_direct_hash, g_direct_equal);
