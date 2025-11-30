@@ -75,6 +75,8 @@ struct _X11IC {
     gchar           *lang;
     gboolean         has_preedit_area;
     XRectangle       preedit_area;
+    gboolean         has_spot_location;
+    XPoint           spot_location;
 
     gchar           *preedit_string;
     IBusAttrList    *preedit_attrs;
@@ -84,7 +86,6 @@ struct _X11IC {
     gint             onspot_preedit_length;
 };
 
-static void     _xim_set_cursor_location    (X11IC              *x11ic);
 static void     _context_commit_text_cb     (IBusInputContext   *context,
                                              IBusText           *text,
                                              X11IC              *x11ic);
@@ -283,6 +284,45 @@ _xim_preedit_callback_draw (XIMS xims, X11IC *x11ic, const gchar *preedit_string
     x11ic->onspot_preedit_length = len;
 }
 
+
+static void
+_xim_set_cursor_location (X11IC *x11ic)
+{
+    XRectangle preedit_area;
+    XWindowAttributes xwa;
+    Window child;
+
+    g_return_if_fail (x11ic != NULL);
+
+    Window w = x11ic->focus_window ? x11ic->focus_window : x11ic->client_window;
+    g_return_if_fail (w != NULL);
+
+    XGetWindowAttributes (_display, w, &xwa);
+    preedit_area.x = 0;
+    preedit_area.y = xwa.height;
+    preedit_area.width  = 1;
+    preedit_area.height = 1;
+
+    if (x11ic->has_spot_location)
+    {
+        preedit_area.x = x11ic->spot_location.x;
+        preedit_area.y = x11ic->spot_location.y;
+    }
+
+    if (x11ic->has_preedit_area)
+        preedit_area = x11ic->preedit_area;
+
+    XTranslateCoordinates (_display, w, xwa.root,
+                           preedit_area.x, preedit_area.y,
+                           (int *)&preedit_area.x, (int *)&preedit_area.y,
+                           &child);
+
+    ibus_input_context_set_cursor_location (x11ic->context,
+                                            preedit_area.x, preedit_area.y,
+                                            preedit_area.width, preedit_area.height);
+}
+
+
 static int
 _xim_store_ic_values (X11IC *x11ic, IMChangeICStruct *call_data)
 {
@@ -309,10 +349,13 @@ _xim_store_ic_values (X11IC *x11ic, IMChangeICStruct *call_data)
     }
 
     for (i = 0; i < (int)call_data->preedit_attr_num; ++i, ++pre_attr) {
-        if (g_strcmp0 (XNSpotLocation, pre_attr->name) == 0) {
+        if (g_strcmp0 (XNArea, pre_attr->name) == 0) {
             x11ic->has_preedit_area = TRUE;
-            x11ic->preedit_area.x = ((XPoint *)pre_attr->value)->x;
-            x11ic->preedit_area.y = ((XPoint *)pre_attr->value)->y;
+            x11ic->preedit_area = *(XRectangle *)pre_attr->value;
+        }
+        else if (g_strcmp0 (XNSpotLocation, pre_attr->name) == 0) {
+            x11ic->has_spot_location = TRUE;
+            x11ic->spot_location = *(XPoint *)pre_attr->value;
         }
         else {
             LOG (1, "Unknown preedit attribute: %s", pre_attr->name);
@@ -351,14 +394,14 @@ xim_create_ic (XIMS xims, IMChangeICStruct *call_data)
         g_return_val_if_reached (0);
     }
 
-    _xim_store_ic_values (x11ic, call_data);
-
     x11ic->context = ibus_bus_create_input_context (_bus, "xim");
-
     if (x11ic->context == NULL) {
         g_slice_free (X11IC, x11ic);
         g_return_val_if_reached (0);
     }
+
+    _xim_store_ic_values (x11ic, call_data);
+    _xim_set_cursor_location (x11ic);
 
     g_signal_connect (x11ic->context, "commit-text",
                         G_CALLBACK (_context_commit_text_cb), x11ic);
@@ -833,47 +876,6 @@ xim_disconnect_ic (XIMS xims, IMDisConnectStruct *call_data)
 }
 
 
-static void
-_xim_set_cursor_location (X11IC *x11ic)
-{
-    g_return_if_fail (x11ic != NULL);
-
-    XRectangle preedit_area = x11ic->preedit_area;
-
-    Window w = x11ic->focus_window ?
-        x11ic->focus_window :x11ic->client_window;
-
-    if (w) {
-        XWindowAttributes xwa;
-        Window child;
-
-        XGetWindowAttributes (_display, w, &xwa);
-        if (preedit_area.x <= 0 && preedit_area.y <= 0) {
-             XTranslateCoordinates (_display, w, xwa.root,
-                0,
-                xwa.height,
-                (int *)&preedit_area.x,
-                (int *)&preedit_area.y,
-                &child);
-        }
-        else {
-            XTranslateCoordinates (_display, w, xwa.root,
-                preedit_area.x,
-                preedit_area.y,
-                (int *)&preedit_area.x,
-                (int *)&preedit_area.y,
-                &child);
-        }
-    }
-
-    ibus_input_context_set_cursor_location (x11ic->context,
-            preedit_area.x,
-            preedit_area.y,
-            preedit_area.width,
-            preedit_area.height);
-}
-
-
 static int
 xim_set_ic_values (XIMS xims, IMChangeICStruct *call_data)
 {
@@ -887,11 +889,8 @@ xim_set_ic_values (XIMS xims, IMChangeICStruct *call_data)
                                            GINT_TO_POINTER ((gint) call_data->icid));
     g_return_val_if_fail (x11ic != NULL, 0);
 
-    i = _xim_store_ic_values (x11ic, call_data);
-
-    if (i) {
-        _xim_set_cursor_location (x11ic);
-    }
+    _xim_store_ic_values (x11ic, call_data);
+    _xim_set_cursor_location (x11ic);
 
     return 1;
 }
