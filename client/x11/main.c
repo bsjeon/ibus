@@ -58,7 +58,6 @@
     }
 
 #include <ibus.h>
-#include "gdk-private.h"
 #include "locales.h"
 
 struct _X11ICONN {
@@ -590,18 +589,18 @@ _process_key_event_count_cb (gpointer user_data)
 static int
 _process_key_event_sync (X11IC                *x11ic,
                          IMForwardEventStruct *call_data,
-                         GdkEventKey          *event)
+                         guint32               keyval,
+                         guint32               keycode,
+                         guint32               state)
 {
     gboolean retval;
 
     g_assert (x11ic);
     g_assert (call_data);
-    g_assert (event);
-    retval = ibus_input_context_process_key_event (
-            x11ic->context,
-            event->keyval,
-            event->hardware_keycode - 8,
-            event->state);
+    retval = ibus_input_context_process_key_event ( x11ic->context,
+                                                    keyval,
+                                                    keycode,
+                                                    state);
     ibus_input_context_post_process_key_event (x11ic->context);
     _xim_forward_key_event_done (x11ic, &call_data->event, retval);
     return 1;
@@ -611,24 +610,25 @@ _process_key_event_sync (X11IC                *x11ic,
 static int
 _process_key_event_async (X11IC                *x11ic,
                           IMForwardEventStruct *call_data,
-                          GdkEventKey          *event)
+                          guint32               keyval,
+                          guint32               keycode,
+                          guint32               state)
 {
     ProcessKeyEventReplyData *data;
 
     g_assert (x11ic);
     g_assert (call_data);
-    g_assert (event);
     if (!(data = g_slice_new0 (ProcessKeyEventReplyData))) {
         g_warning ("Cannot allocate async data");
-        return _process_key_event_sync (x11ic, call_data, event);
+        return _process_key_event_sync (x11ic, call_data, keyval, keycode, state);
     }
     data->connect_id = call_data->connect_id;
     data->x11ic = x11ic;
     data->event = call_data->event;
     ibus_input_context_process_key_event_async (x11ic->context,
-                                                event->keyval,
-                                                event->hardware_keycode - 8,
-                                                event->state,
+                                                keyval,
+                                                keycode,
+                                                state,
                                                 -1,
                                                 NULL,
                                                 _process_key_event_done,
@@ -640,7 +640,9 @@ _process_key_event_async (X11IC                *x11ic,
 static int
 _process_key_event_hybrid_async (X11IC                *x11ic,
                                  IMForwardEventStruct *call_data,
-                                 GdkEventKey          *event)
+                                 guint32               keyval,
+                                 guint32               keycode,
+                                 guint32               state)
 {
     GSource *source;
     ProcessKeyEventReplyData *data = NULL;
@@ -648,14 +650,13 @@ _process_key_event_hybrid_async (X11IC                *x11ic,
 
     g_assert (x11ic);
     g_assert (call_data);
-    g_assert (event);
     source = g_timeout_source_new (1);
     if (source)
         data = g_slice_new0 (ProcessKeyEventReplyData);
     if (!data) {
         int xim_retval;
         g_warning ("Cannot wait for the reply of the process key event.");
-        xim_retval = _process_key_event_sync (x11ic, call_data, event);
+        xim_retval = _process_key_event_sync (x11ic, call_data, keyval, keycode, state);
         if (source)
             g_source_destroy (source);
         return xim_retval;
@@ -668,9 +669,9 @@ _process_key_event_hybrid_async (X11IC                *x11ic,
     data->x11ic = x11ic;
     data->event = call_data->event;
     ibus_input_context_process_key_event_async (x11ic->context,
-                                                event->keyval,
-                                                event->hardware_keycode - 8,
-                                                event->state,
+                                                keyval,
+                                                keycode,
+                                                state,
                                                 -1,
                                                 NULL,
                                                 _process_key_event_reply_done,
@@ -702,8 +703,9 @@ static int
 xim_forward_event (XIMS xims, IMForwardEventStruct *call_data)
 {
     X11IC *x11ic;
+    char buffer[1];
     XKeyEvent *xevent;
-    GdkEventKey event;
+    guint32 keyval, keycode, state;
 
     LOG (1, "XIM_FORWARD_EVENT ic=%d connect_id=%d",
          call_data->icid, call_data->connect_id);
@@ -715,23 +717,21 @@ xim_forward_event (XIMS xims, IMForwardEventStruct *call_data)
 
     xevent = (XKeyEvent*) &(call_data->event);
 
-    translate_key_event (gdk_display_get_default (),
-        (GdkEvent *)&event, (XEvent *)xevent);
+    keycode = xevent->keycode - 8;
+    state = xevent->state;
+    if (xevent->type == KeyRelease)
+        state |= IBUS_RELEASE_MASK;
 
-    event.send_event = xevent->send_event;
-    event.window = NULL;
-
-    if (event.type == GDK_KEY_RELEASE) {
-        event.state |= IBUS_RELEASE_MASK;
-    }
+    keyval = XK_VoidSymbol;
+    XLookupString (xevent, buffer, 1, (KeySym *)&keyval, NULL);
 
     switch (_use_sync_mode) {
     case 1:
-        return _process_key_event_sync (x11ic, call_data, &event);
+        return _process_key_event_sync (x11ic, call_data, keyval, keycode, state);
     case 2:
-        return _process_key_event_hybrid_async (x11ic, call_data, &event);
+        return _process_key_event_hybrid_async (x11ic, call_data, keyval, keycode, state);
     default:
-        return _process_key_event_async (x11ic, call_data, &event);
+        return _process_key_event_async (x11ic, call_data, keyval, keycode, state);
     }
     g_assert_not_reached ();
     return 0;
