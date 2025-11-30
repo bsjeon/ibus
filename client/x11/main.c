@@ -1207,20 +1207,6 @@ _get_char_env (const gchar *name,
 }
 
 static void
-_init_ibus (void)
-{
-    if (_bus != NULL)
-        return;
-
-    ibus_init ();
-
-    _bus = ibus_bus_new ();
-
-    g_signal_connect (_bus, "disconnected",
-                        G_CALLBACK (_bus_disconnected_cb), NULL);
-}
-
-static void
 _xim_init_IMdkit ()
 {
 #if 0
@@ -1286,13 +1272,6 @@ _xim_init_IMdkit ()
         IMProtocolHandler, ims_protocol_handler,
         IMFilterEventMask, KeyPressMask | KeyReleaseMask,
         NULL);
-
-    _init_ibus ();
-
-    if (!ibus_bus_is_connected (_bus)) {
-        g_warning ("Can not connect to ibus daemon");
-        exit (EXIT_FAILURE);
-    }
 }
 
 static void
@@ -1430,6 +1409,14 @@ main (int argc, char **argv)
         atexit (_atexit_cb);
 
     _xim_init_IMdkit ();
+
+    ibus_init ();
+    _bus = ibus_bus_new ();
+    if (!ibus_bus_is_connected (_bus)) {
+        g_warning ("Can not connect to ibus daemon");
+        exit (EXIT_FAILURE);
+    }
+    g_signal_connect (_bus, "disconnected", G_CALLBACK (_bus_disconnected_cb), NULL);
     ibus_main();
 
     exit (EXIT_SUCCESS);
